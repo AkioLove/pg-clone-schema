@@ -43,6 +43,8 @@ DECLARE
   v_diag2          text;
   v_diag3          text;
   v_diag4          text;
+  constraint_name_ text;
+  constraint_def_ text;
 
 BEGIN
 
@@ -213,20 +215,19 @@ BEGIN
     
 --  add FK constraint
   cnt := 0;
-  FOR qry IN
-    SELECT 'ALTER TABLE ' || quote_ident(dest_schema) || '.' || quote_ident(rn.relname)
-                          || ' ADD CONSTRAINT ' || quote_ident(ct.conname) || ' ' || pg_get_constraintdef(ct.oid) || ';'
-      FROM pg_constraint ct
-      JOIN pg_class rn ON rn.oid = ct.conrelid
-     WHERE connamespace = src_oid
-       AND rn.relkind = 'r'
-       AND ct.contype = 'f'
-
+  FOR object IN
+    SELECT table_name::text FROM information_schema.TABLES WHERE table_schema = source_schema
     LOOP
-      cnt := cnt + 1;
-      EXECUTE qry;
-
+      buffer := dest_schema || '.' || object;
+      -- create foreign keys
+      FOR constraint_name_, constraint_def_ IN
+         SELECT conname::text, REPLACE(pg_get_constraintdef(pg_constraint.oid), source_schema||'.', dest_schema||'.') FROM pg_constraint INNER JOIN pg_class ON conrelid=pg_class.oid INNER JOIN pg_namespace ON pg_namespace.oid=pg_class.relnamespace WHERE contype='f' and relname=object and nspname=source_schema
+         LOOP
+             EXECUTE 'ALTER TABLE '|| buffer ||' ADD CONSTRAINT '|| constraint_name_ ||' '|| constraint_def_;
+         cnt := cnt + 1;
+         END LOOP;
     END LOOP;
+
   RAISE NOTICE '     FKEYS cloned: %', LPAD(cnt::text, 5, ' ');
   
 -- Create views
